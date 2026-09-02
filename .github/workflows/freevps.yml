@@ -59,7 +59,12 @@ jobs:
           echo "  ISP     : $ORG"
           echo "================================================"
 
-          ping -c 4 $PUBLIC_IP
+          echo "📡 Pinging 8.8.8.8 (Google DNS)..."
+          ping -c 4 8.8.8.8
+
+          echo "📡 Pinging 1.1.1.1 (Cloudflare)..."
+          ping -c 4 1.1.1.1
+
           echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
 
       - name: 🔑 Setup tmate SSH
