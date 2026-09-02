@@ -37,34 +37,81 @@ jobs:
           docker exec cynet-kali apt-get update -y
           docker exec cynet-kali apt-get install -y -q nmap metasploit-framework sqlmap hydra curl wget python3 git sudo zsh tmux
 
-      - name: 🌐 Launch Interactive Web Terminal & Public Link
+      - name: 🌐 Launch Interactive Web Terminal & Keep-Alive
         run: |
           echo "=========================================================="
           echo "  🎉 LAUNCHING INTERACTIVE KALI WEB TERMINAL..."
           echo "=========================================================="
           
-          # اجرای وب ترمینال با فلگ -W برای فعال‌سازی کامل تایپ و کیبورد
+          # تابع برای گرفتن URL جدید
+          get_tunnel_url() {
+            grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' /tmp/tunnel.log 2>/dev/null | tail -1
+          }
+
+          # استارت اولیه ttyd
           ttyd -W -p 7681 -t fontSize=16 -t theme='{"background": "#0f172a", "foreground": "#38bdf8", "cursor": "#38bdf8"}' docker exec -it cynet-kali /bin/bash > /dev/null 2>&1 &
-          sleep 3
-
-          # ایجاد تانل کلودفلر
-          cloudflared tunnel --url http://localhost:7681 > tunnel.log 2>&1 &
           
+          # استارت اولیه تانل
+          cloudflared tunnel --url http://localhost:7681 > /tmp/tunnel.log 2>&1 &
           sleep 5
-          for i in {1..20}; do
-            URL=$(grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' tunnel.log | head -n 1)
-            if [ -n "$URL" ]; then
-              echo ""
-              echo "=========================================================="
-              echo "  🔥 YOUR INTERACTIVE KALI LINUX IS LIVE & READY!"
-              echo "  👉 CLICK TO OPEN IN BROWSER: $URL"
-              echo "  --------------------------------------------------------"
-              echo "  ⚡ Full Root Access | 1000 Mbps Internet | Keyboard Active"
-              echo "=========================================================="
-              echo ""
-              break
-            fi
-            sleep 2
-          done
 
-          tail -f tunnel.log
+          # گرفتن URL اولیه
+          CF_URL=$(get_tunnel_url)
+          echo ""
+          echo "=========================================================="
+          echo "  🔥 YOUR INTERACTIVE KALI LINUX IS LIVE & READY!"
+          echo "  👉 CLICK TO OPEN IN BROWSER: $CF_URL"
+          echo "  --------------------------------------------------------"
+          echo "  ⚡ Full Root Access | 1000 Mbps Internet | Keyboard Active"
+          echo "=========================================================="
+          echo ""
+
+          # ---------- حلقه نگهداری (Keep-Alive) ----------
+          TICK=0
+          while true; do
+            TICK=$((TICK + 1))
+            NOW=$(date "+%H:%M:%S")
+
+            # بررسی ttyd
+            if ! pgrep -x ttyd > /dev/null; then
+              echo "[$NOW] ⚠️ TTYD dead, restarting..."
+              ttyd -W -p 7681 -t fontSize=16 -t theme='{"background": "#0f172a", "foreground": "#38bdf8", "cursor": "#38bdf8"}' docker exec -it cynet-kali /bin/bash > /dev/null 2>&1 &
+            fi
+
+            # بررسی cloudflared
+            if ! pgrep -x cloudflared > /dev/null; then
+              echo "[$NOW] ⚠️ Tunnel dead, restarting..."
+              cloudflared tunnel --url http://localhost:7681 >> /tmp/tunnel.log 2>&1 &
+              sleep 5
+              NEW_URL=$(get_tunnel_url)
+              if [ -n "$NEW_URL" ]; then
+                echo "[$NOW] ✅ New Tunnel URL: $NEW_URL"
+              fi
+            fi
+
+            # بررسی کانتینر داکر
+            if ! docker ps --filter "name=cynet-kali" --format "{{.Names}}" | grep -q cynet-kali; then
+              echo "[$NOW] ⚠️ Docker container dead, restarting..."
+              docker run -d \
+                --name cynet-kali \
+                --privileged \
+                --network host \
+                -v /root:/root \
+                kalilinux/kali-rolling \
+                tail -f /dev/null
+              # نصب مجدد ابزارها (اختیاری)
+              docker exec cynet-kali apt-get update -y
+              docker exec cynet-kali apt-get install -y -q nmap metasploit-framework sqlmap hydra curl wget python3 git sudo zsh tmux
+            fi
+
+            # ضربان قلب هر ۲۰ دور (حدود ۱۰ دقیقه)
+            if [ $((TICK % 20)) -eq 0 ]; then
+              PUBLIC_IP=$(curl -s ifconfig.me)
+              echo "[$NOW] ❤️ Heartbeat #$TICK"
+              echo "  RAM : $(free -h | awk '/^Mem:/{print $3"/"$2}')"
+              echo "  IP  : $PUBLIC_IP"
+              echo "  URL : $(get_tunnel_url)"
+            fi
+
+            sleep 30
+          done
