@@ -26,19 +26,15 @@ jobs:
             unzip jq \
             zsh neofetch iputils-ping
 
-      - name: 🐚 Setup ZSH + Oh-My-Zsh
+      - name: 🐚 Setup ZSH
         run: |
           sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended || true
-          chsh -s $(which zsh) runner || true
 
-      - name: 🌐 Install Cloudflare Tunnel + TTYD
+      - name: 🌐 Install Cloudflare + TTYD
         run: |
-          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
-            -O /usr/local/bin/cloudflared
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
           chmod +x /usr/local/bin/cloudflared
-
-          wget -q https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 \
-            -O /usr/local/bin/ttyd
+          wget -q https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd
           chmod +x /usr/local/bin/ttyd
 
       - name: 👤 Create VPS User
@@ -48,147 +44,89 @@ jobs:
           sudo usermod -aG sudo vps
           echo "vps ALL=(ALL) NOPASSWD:ALL" | sudo tee -a /etc/sudoers > /dev/null
 
-          sudo tee /etc/motd > /dev/null << 'MOTD'
- ╔═══════════════════════════════════════════╗
- ║   🔥 FREE VPS — GITHUB ACTIONS RUNNER    ║
- ║   2 vCPU | 7GB RAM | 14GB Disk           ║
- ║   Tunnel: Cloudflare + tmate SSH         ║
- ╚═══════════════════════════════════════════╝
-MOTD
-
       - name: 🌐 Get Public IP + Ping Test
         run: |
           PUBLIC_IP=$(curl -s ifconfig.me)
           IPINFO=$(curl -s ipinfo.io)
-          
           CITY=$(echo $IPINFO    | jq -r '.city')
-          REGION=$(echo $IPINFO  | jq -r '.region')
           COUNTRY=$(echo $IPINFO | jq -r '.country')
           ORG=$(echo $IPINFO     | jq -r '.org')
 
-          echo ""
-          echo "╔══════════════════════════════════════════════════════╗"
-          echo "║              🌍 VPS NETWORK INFO                     ║"
-          echo "╠══════════════════════════════════════════════════════╣"
-          echo "║  IP      : $PUBLIC_IP"
-          echo "║  City    : $CITY, $REGION"
-          echo "║  Country : $COUNTRY"
-          echo "║  ISP     : $ORG"
-          echo "╚══════════════════════════════════════════════════════╝"
-          echo ""
+          echo "================================================"
+          echo "  IP      : $PUBLIC_IP"
+          echo "  City    : $CITY"
+          echo "  Country : $COUNTRY"
+          echo "  ISP     : $ORG"
+          echo "================================================"
 
-          echo "📡 Pinging $PUBLIC_IP ..."
-          ping -c 4 $PUBLIC_IP | tee /tmp/ping_result.txt
-
-          AVG_PING=$(grep -oP 'avg = \K[\d.]+' /tmp/ping_result.txt || \
-                     grep -oP 'min/avg/max.*= [\d.]+/\K[\d.]+' /tmp/ping_result.txt)
-
-          echo ""
-          echo "╔══════════════════════════════════════════════════════╗"
-          echo "║              📡 PING RESULTS                         ║"
-          echo "╠══════════════════════════════════════════════════════╣"
-          echo "║  Target  : $PUBLIC_IP"
-          echo "║  Avg RTT : ${AVG_PING}ms"
-          echo "╚══════════════════════════════════════════════════════╝"
-
+          ping -c 4 $PUBLIC_IP
           echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
 
-      - name: 🔑 Setup tmate SSH Session
+      - name: 🔑 Setup tmate SSH
         run: |
           tmate -S /tmp/tmate.sock new-session -d -s main -x 220 -y 50
           tmate -S /tmp/tmate.sock wait tmate-ready
-
-          TMATE_SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
-          TMATE_WEB=$(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')
-
+          TMATE_SSH=$(tmate -S /tmp/tmate.sock display -p "#{tmate_ssh}")
+          TMATE_WEB=$(tmate -S /tmp/tmate.sock display -p "#{tmate_web}")
           echo "TMATE_SSH=$TMATE_SSH" >> $GITHUB_ENV
           echo "TMATE_WEB=$TMATE_WEB" >> $GITHUB_ENV
-
-          echo ""
-          echo "╔══════════════════════════════════════════════════════╗"
-          echo "║         🔑 SSH ACCESS VIA TMATE                      ║"
-          echo "╠══════════════════════════════════════════════════════╣"
-          echo "║  SSH  : $TMATE_SSH"
-          echo "║  WEB  : $TMATE_WEB"
-          echo "╚══════════════════════════════════════════════════════╝"
+          echo "SSH : $TMATE_SSH"
+          echo "WEB : $TMATE_WEB"
 
       - name: 💻 Launch TTYD Web Terminal
         run: |
-          ttyd -W -p 7681 \
-            -t fontSize=15 \
-            -t 'theme={"background":"#0d1117","foreground":"#58a6ff","cursor":"#58a6ff"}' \
-            -c admin:admin123 \
-            /bin/bash &
-
+          ttyd -W -p 7681 -c admin:admin123 /bin/bash &
           sleep 2
-          echo "✅ TTYD started on port 7681"
+          echo "TTYD started on port 7681"
 
-      - name: 🌍 Cloudflare Tunnel → Public URL
+      - name: 🌍 Cloudflare Tunnel
         run: |
           cloudflared tunnel --url http://localhost:7681 > /tmp/cf.log 2>&1 &
-
           CF_URL=""
-          for i in {1..30}; do
-            CF_URL=$(grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' /tmp/cf.log | head -1)
+          for i in $(seq 1 30); do
+            CF_URL=$(grep -o "https://[a-zA-Z0-9-]*\.trycloudflare\.com" /tmp/cf.log | head -1)
             [ -n "$CF_URL" ] && break
             sleep 2
           done
+          echo "================================================"
+          echo "  WEB URL : $CF_URL"
+          echo "  User    : admin"
+          echo "  Pass    : admin123"
+          echo "  SSH     : $TMATE_SSH"
+          echo "================================================"
 
-          echo ""
-          echo "╔══════════════════════════════════════════════════════╗"
-          echo "║          🌐 WEB TERMINAL ACCESS                      ║"
-          echo "╠══════════════════════════════════════════════════════╣"
-          echo "║  URL  : $CF_URL"
-          echo "║  User : admin"
-          echo "║  Pass : admin123"
-          echo "╚══════════════════════════════════════════════════════╝"
-          echo ""
-          echo "╔══════════════════════════════════════════════════════╗"
-          echo "║          🔑 SSH TERMINAL ACCESS                      ║"
-          echo "╠══════════════════════════════════════════════════════╣"
-          echo "║  CMD  : $TMATE_SSH"
-          echo "║  WEB  : $TMATE_WEB"
-          echo "╚══════════════════════════════════════════════════════╝"
-
-      - name: ♾️ Keep-Alive + Health Monitor
+      - name: ♾️ Keep-Alive Loop
         run: |
-          echo "🔄 Keep-alive loop started"
-
           TICK=0
           while true; do
             TICK=$((TICK + 1))
-            NOW=$(date '+%H:%M:%S')
+            NOW=$(date "+%H:%M:%S")
 
             if ! pgrep -x ttyd > /dev/null; then
-              echo "[$NOW] ⚠️  TTYD dead — restarting..."
+              echo "[$NOW] TTYD dead, restarting..."
               ttyd -W -p 7681 -c admin:admin123 /bin/bash &
             fi
 
             if ! pgrep -x cloudflared > /dev/null; then
-              echo "[$NOW] ⚠️  Tunnel dead — restarting..."
+              echo "[$NOW] Tunnel dead, restarting..."
               cloudflared tunnel --url http://localhost:7681 >> /tmp/cf.log 2>&1 &
               sleep 8
-              NEW_URL=$(grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' /tmp/cf.log | tail -1)
-              echo "[$NOW] 🔗 New URL: $NEW_URL"
+              NEW_URL=$(grep -o "https://[a-zA-Z0-9-]*\.trycloudflare\.com" /tmp/cf.log | tail -1)
+              echo "[$NOW] New URL: $NEW_URL"
             fi
 
             if ! tmate -S /tmp/tmate.sock has-session -t main 2>/dev/null; then
-              echo "[$NOW] ⚠️  tmate dead — restarting..."
+              echo "[$NOW] tmate dead, restarting..."
               tmate -S /tmp/tmate.sock new-session -d -s main -x 220 -y 50
               tmate -S /tmp/tmate.sock wait tmate-ready
-              echo "[$NOW] 🔑 New SSH: $(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')"
+              echo "[$NOW] New SSH: $(tmate -S /tmp/tmate.sock display -p "#{tmate_ssh}")"
             fi
 
             if [ $((TICK % 20)) -eq 0 ]; then
-              echo "[$NOW] 💓 Heartbeat #$TICK"
+              echo "[$NOW] Heartbeat #$TICK"
               echo "  RAM : $(free -h | awk '/^Mem:/{print $3"/"$2}')"
-              echo "  CPU : $(top -bn1 | grep 'Cpu(s)' | awk '{print $2}')%"
-              echo "  DISK: $(df -h / | awk 'NR==2{print $3"/"$2}')"
               echo "  IP  : $PUBLIC_IP"
-
-              # پینگ مجدد هر ۱۰ دقیقه
-              ping -c 2 $PUBLIC_IP | grep -oP 'time=\K[\d.]+' | \
-                awk '{print "  RTT : "$1"ms"}'
+              ping -c 2 $PUBLIC_IP | grep time
             fi
 
             sleep 30
